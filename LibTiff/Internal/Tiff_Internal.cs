@@ -326,6 +326,11 @@ namespace BitMiracle.LibTiff.Classic
         /// <returns><c>true</c> if succeeded; otherwise, <c>false</c></returns>
         private bool WriteCustomDirectory(out long pdiroff)
         {
+            // this method is private and never called (currently)
+            // however it has the potential to mess with the IFD chain
+            // so we invalidate the directory linked list shortcut 
+            resetPenultimateDirectoryOffset();
+
             pdiroff = -1;
 
             if (m_mode == O_RDONLY)
@@ -539,7 +544,7 @@ namespace BitMiracle.LibTiff.Classic
         }
 
 #if FIX_JPEG_IS_OJPEG
-        private bool checkJpegIsOJpeg(ref int v, TiffDirEntry[] dir, ulong dircount)
+        private static bool checkJpegIsOJpeg(ref int v, TiffDirEntry[] dir, ulong dircount)
         {
             // detect a bug in some older JPEG-IN-TIFF formats (emitted by (unknown) scanner software)
             // where the Compression field reports new-style JPEG (7) but the JPEG encoded data

@@ -5,6 +5,7 @@
 
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -68,7 +69,7 @@ namespace BitMiracle.LibTiff.Classic
         public static string GetVersion()
         {
             return string.Format(CultureInfo.InvariantCulture,
-                "LibTiff.Net, Version {0}\nCopyright (C) 2008-2015, Bit Miracle.", AssemblyVersion);
+                "LibTiff.Net, Version {0}\nCopyright (C) 2008-2023, Bit Miracle.", AssemblyVersion);
         }
 
         /// <summary>
@@ -79,11 +80,7 @@ namespace BitMiracle.LibTiff.Classic
         {
             get
             {
-#if !NETSTANDARD
                 Assembly assembly = Assembly.GetExecutingAssembly();
-#else
-                Assembly assembly = typeof(Tiff).GetTypeInfo().Assembly;
-#endif
                 string assemblyVersion = assembly.FullName.Split(',')[1];
                 return assemblyVersion.Split('=')[1];
             }
@@ -490,13 +487,7 @@ namespace BitMiracle.LibTiff.Classic
             m_stream.Close(m_clientdata);
 
             if (m_fileStream != null)
-            {
-#if !NETSTANDARD
                 m_fileStream.Close();
-#else
-                m_fileStream.Dispose();
-#endif
-            }
         }
 
         /// <summary>
@@ -796,7 +787,7 @@ namespace BitMiracle.LibTiff.Classic
         /// current directory of the opened TIFF file. The tag is identified by
         /// <paramref name="tag"/>. The type and number of values returned is dependent on the
         /// tag being requested. You may want to consult
-        /// <a href = "54cbd23d-dc55-44b9-921f-3a06efc2f6ce.htm">"Well-known tags and their
+        /// <a href = "../articles/KB/well-known-tags.html">"Well-known tags and their
         /// value(s) data types"</a> to become familiar with exact data types and calling
         /// conventions required for each tag supported by the library.
         /// </para>
@@ -832,7 +823,7 @@ namespace BitMiracle.LibTiff.Classic
         /// tag is not defined in the current directory and it has a default value(s). The tag is
         /// identified by <paramref name="tag"/>. The type and number of values returned is
         /// dependent on the tag being requested. You may want to consult
-        /// <a href="54cbd23d-dc55-44b9-921f-3a06efc2f6ce.htm">"Well-known tags and their
+        /// <a href="../articles/KB/well-known-tags.html">"Well-known tags and their
         /// value(s) data types"</a> to become familiar with exact data types and calling
         /// conventions required for each tag supported by the library.
         /// </para>
@@ -2452,8 +2443,16 @@ namespace BitMiracle.LibTiff.Classic
             ulong nextdir = m_header.tiff_diroff;
             short n = 0;
             long dummyOff;
+            var seen = new HashSet<ulong>();
+            seen.Add(nextdir);
             while (nextdir != 0 && advanceDirectory(ref nextdir, out dummyOff))
+            {
+                if (seen.Contains(nextdir))
+                    throw new InvalidDataException("Loop detected while getting number of directories");
+
+                seen.Add(nextdir);
                 n++;
+            }
 
             return n;
         }
@@ -2704,7 +2703,7 @@ namespace BitMiracle.LibTiff.Classic
         /// Creates a new directory within file/stream.
         /// </summary>
         /// <remarks>The newly created directory will not exist on the file/stream till
-        /// <see cref="WriteDirectory"/>, <see cref="CheckpointDirectory"/>, <see cref="Flush"/>
+        /// <see cref="WriteDirectory()"/>, <see cref="CheckpointDirectory()"/>, <see cref="Flush"/>
         /// or <see cref="Close"/> is called.</remarks>
         public void CreateDirectory()
         {
@@ -2794,6 +2793,10 @@ namespace BitMiracle.LibTiff.Classic
         {
             const string module = "UnlinkDirectory";
 
+            // Unlinking a directory changes the linked list. While we could handle this, 
+            // the simple choice is to invalidate the stored shortcut for linkDirectory() here 
+            resetPenultimateDirectoryOffset();
+
             if (m_mode == O_RDONLY)
             {
                 ErrorExt(this, m_clientdata, module, "Can not unlink directory in read-only file");
@@ -2873,7 +2876,7 @@ namespace BitMiracle.LibTiff.Classic
         /// reading or writing. The tag is identified by <paramref name="tag"/>.
         /// The type and number of values in <paramref name="value"/> is dependent on the tag
         /// being set. You may want to consult
-        /// <a href = "54cbd23d-dc55-44b9-921f-3a06efc2f6ce.htm">"Well-known tags and their
+        /// <a href = "../articles/KB/well-known-tags.html">"Well-known tags and their
         /// value(s) data types"</a> to become familiar with exact data types and calling
         /// conventions required for each tag supported by the library.
         /// </para><para>
@@ -2911,12 +2914,12 @@ namespace BitMiracle.LibTiff.Classic
         /// </summary>
         /// <returns><c>true</c> if the current directory was rewritten successfully;
         /// otherwise, <c>false</c></returns>
-        /// <remarks>Unlike <see cref="WriteDirectory"/>, <b>CheckpointDirectory</b> does not free
+        /// <remarks>Unlike <see cref="WriteDirectory()"/>, <b>CheckpointDirectory</b> does not free
         /// up the directory data structures in memory, so they can be updated (as strips/tiles
         /// are written) and written again. Reading such a partial file you will at worst get a
         /// TIFF read error for the first strip/tile encountered that is incomplete, but you will
         /// at least get all the valid data in the file before that. When the file is complete,
-        /// just use <see cref="WriteDirectory"/> as usual to finish it off cleanly.</remarks>
+        /// just use <see cref="WriteDirectory()"/> as usual to finish it off cleanly.</remarks>
         public bool CheckpointDirectory()
         {
             // Setup the strips arrays, if they haven't already been.
@@ -2934,10 +2937,10 @@ namespace BitMiracle.LibTiff.Classic
         /// </summary>        
         /// <returns><c>true</c> if the current directory was rewritten successfully;
         /// otherwise, <c>false</c></returns>
-        /// <remarks>The <b>RewriteDirectory</b> operates similarly to <see cref="WriteDirectory"/>,
+        /// <remarks>The <b>RewriteDirectory</b> operates similarly to <see cref="WriteDirectory()"/>,
         /// but can be called with directories previously read or written that already have an
         /// established location in the file. It will rewrite the directory, but instead of place
-        /// it at it's old location (as <see cref="WriteDirectory"/> would) it will place them at
+        /// it at it's old location (as <see cref="WriteDirectory()"/> would) it will place them at
         /// the end of the file, correcting the pointer from the preceeding directory or file
         /// header to point to it's new location. This is particularly important in cases where
         /// the size of the directory and pointed to data has grown, so it won’t fit in the space
@@ -2950,6 +2953,10 @@ namespace BitMiracle.LibTiff.Classic
             // We don't need to do anything special if it hasn't been written.
             if (m_diroff == 0)
                 return WriteDirectory();
+
+            // If we get here, the IFD linked list is about to change. While we could handle this, 
+            // the simple choice is to invalidate the stored shortcut for linkDirectory() here 
+            resetPenultimateDirectoryOffset();
 
             // Find and zero the pointer to this directory, so that linkDirectory will cause it to
             // be added after this directories current pre-link.
@@ -3654,7 +3661,7 @@ namespace BitMiracle.LibTiff.Classic
         /// </para><para>
         /// Once data are written to a file/stream for the current directory, the values of
         /// certain tags may not be altered; see
-        /// <a href="54cbd23d-dc55-44b9-921f-3a06efc2f6ce.htm">"Well-known tags and their
+        /// <a href="../articles/KB/well-known-tags.html">"Well-known tags and their
         /// value(s) data types"</a> for more information.
         /// </para><para>
         /// It is not possible to write scanlines to a file/stream that uses a tiled organization.
@@ -3703,7 +3710,7 @@ namespace BitMiracle.LibTiff.Classic
         /// </para><para>
         /// Once data are written to a file/stream for the current directory, the values of
         /// certain tags may not be altered; see
-        /// <a href="54cbd23d-dc55-44b9-921f-3a06efc2f6ce.htm">"Well-known tags and their
+        /// <a href="../articles/KB/well-known-tags.html">"Well-known tags and their
         /// value(s) data types"</a> for more information.
         /// </para><para>
         /// It is not possible to write scanlines to a file/stream that uses a tiled organization.
@@ -3754,7 +3761,7 @@ namespace BitMiracle.LibTiff.Classic
         /// </para><para>
         /// Once data are written to a file/stream for the current directory, the values of
         /// certain tags may not be altered; see 
-        /// <a href = "54cbd23d-dc55-44b9-921f-3a06efc2f6ce.htm">"Well-known tags and their
+        /// <a href = "../articles/KB/well-known-tags.html">"Well-known tags and their
         /// value(s) data types"</a> for more information.
         /// </para><para>
         /// It is not possible to write scanlines to a file/stream that uses a tiled organization.
@@ -5899,7 +5906,7 @@ namespace BitMiracle.LibTiff.Classic
         {
             SwabArrayOfLong(array, 0, count);
         }
-        
+
         /// <summary>
         /// Swaps the bytes in specified number of values in the array of 64-bit items.
         /// </summary>
@@ -5946,7 +5953,7 @@ namespace BitMiracle.LibTiff.Classic
                 array[offset] += bytes[3] << 24;
             }
         }
-        
+
         /// <summary>
         /// Swaps the bytes in specified number of values in the array of 64-bit items
         /// starting at specified offset.
